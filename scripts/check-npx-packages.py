@@ -12,6 +12,12 @@ published package is @shinzolabs/hubspot-mcp.
 A published name can still belong to someone else. On 2026-11-04 the guide
 credited `npx mcp-scan` to Snyk, but that npm name has an unrelated publisher.
 Such names are listed in WRONG_PUBLISHER and fail the check as well.
+
+Default CI checks package names, not versions staged for a future release.
+After publication, run:
+    python3 scripts/check-npx-packages.py --check-versions mcp-server/README.md
+This checks exact SemVer pins in install commands and MCP configuration. Ranges
+and dist tags remain name-only (resolving them requires npm SemVer semantics).
 """
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -27,7 +33,7 @@ import urllib.request
 
 ROOT = Path(__file__).resolve().parents[1]
 SCOPED_DIRS = ('guide', 'examples', 'tools', 'quiz', '.claude')
-SCOPED_FILES = ('README.md',)
+SCOPED_FILES = ('README.md', 'mcp-server/README.md')
 TEXT_TYPES = {'.md', '.txt', '.json', '.yaml', '.yml', '.sh', '.ps1', '.toml', '.qmd'}
 # The threat database lists removed malicious packages on purpose, and it is a
 # mirror of AgentSec Triage, which owns its corrections.
@@ -39,7 +45,15 @@ WRONG_PUBLISHER = {
                 'the PyPI package snyk-agent-scan (uvx snyk-agent-scan@latest)',
 }
 
-NAME = r'@?[A-Za-z0-9][\w.\-]*(?:/[\w.\-]+)?(?:@[\w.\-^~]+)?'
+NAME = r'@?[A-Za-z0-9][\w.\-]*(?:/[\w.\-]+)?(?:@[\w.\-^~+]+)?'
+CORE_NUMBER = r'(?:0|[1-9][0-9]*)'
+PRERELEASE_ID = r'(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)'
+BUILD_ID = r'[0-9A-Za-z-]+'
+EXACT_VERSION = re.compile(
+    rf'^{CORE_NUMBER}\.{CORE_NUMBER}\.{CORE_NUMBER}'
+    rf'(?:-{PRERELEASE_ID}(?:\.{PRERELEASE_ID})*)?'
+    rf'(?:\+{BUILD_ID}(?:\.{BUILD_ID})*)?$'
+)
 FLAGS = r'(?:(?:-y|--yes|-q|--quiet|-g|--global|-D|--save-dev|--no-install)\s+)*'
 COMMAND = re.compile(r'(?<![\w/-])(?:npx|npm\s+(?:install|i|exec)|pnpm\s+(?:add|dlx)|bunx)\s+'
                      + FLAGS + r'(?P<pkg>' + NAME + r')')
@@ -57,25 +71,39 @@ def bare_name(token):
     return token.split('@', 1)[0]
 
 
+
+def exact_version_spec(token):
+    """Preserve an exact pinned SemVer without resolving ranges or tags."""
+    cleaned = token.strip().strip('"\'`,;)')
+    name = bare_name(cleaned)
+    suffix = cleaned[len(name) + 1:] if cleaned.startswith(name + '@') else ''
+    return cleaned if suffix and EXACT_VERSION.fullmatch(suffix) else name
+
+
 def is_candidate(name):
     return (name and name.lower() not in NOT_PACKAGES and not PLACEHOLDER.search(name)
             and not name.startswith(('.', '-')) and not name.endswith(('.js', '.ts', '.mjs', '.sh'))
             and name == name.lower())
 
 
-def extract(text):
-    """Return {(name, line)} for every package a command or MCP config would fetch."""
+def extract(text, preserve_versions=False):
+    """Return {(package spec, line)}; exact SemVer pins are optional.
+
+    Name-only mode remains default for pre-publication CI. A version can be
+    cited in generated docs before the release exists in the npm registry.
+    """
     found = set()
+    parse = exact_version_spec if preserve_versions else bare_name
     for m in COMMAND.finditer(text):
-        name = bare_name(m.group('pkg'))
-        if is_candidate(name):
-            found.add((name, text.count('\n', 0, m.start()) + 1))
+        spec = parse(m.group('pkg'))
+        if is_candidate(bare_name(spec)):
+            found.add((spec, text.count('\n', 0, m.start()) + 1))
     for m in JSON_NPX.finditer(text):
         args = re.findall(r'"([^"]*)"', m.group('args'))
         first = next((a for a in args if not a.startswith('-')), '')
-        name = bare_name(first)
-        if is_candidate(name):
-            found.add((name, text.count('\n', 0, m.start()) + 1))
+        spec = parse(first)
+        if is_candidate(bare_name(spec)):
+            found.add((spec, text.count('\n', 0, m.start()) + 1))
     return found
 
 
@@ -104,9 +132,21 @@ def fetch(url, read_body=False):
     return None, b''
 
 
-def registry_status(name):
+def registry_status(spec):
+    name = bare_name(spec)
     status, _ = fetch(REGISTRY + urllib.parse.quote(name, safe='@'))
     if status == 200:
+        if spec != name:
+            version = spec[len(name) + 1:]
+            # Build metadata does not distinguish a publishable npm version.
+            published_version = version.split('+', 1)[0]
+            version_status, _ = fetch(
+                REGISTRY + urllib.parse.quote(name, safe='@') + '/'
+                + urllib.parse.quote(published_version, safe=''))
+            if version_status == 404:
+                return f'package exists, but exact version {version} is not published'
+            if version_status != 200:
+                return f'registry could not verify exact version {version} (status {version_status})'
         return 'published'
     if status == 404:
         if name.startswith('@'):
@@ -123,6 +163,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('files', nargs='*', type=Path, help='Scan these files instead of the scoped tree')
     parser.add_argument('--self-test', action='store_true', help='Test the extractor offline')
+    parser.add_argument('--check-versions', action='store_true',
+                        help='Check exact SemVer pins in listed files after publication; NOT pre-release CI')
     args = parser.parse_args()
     if args.self_test:
         sample = '\n'.join((
@@ -142,27 +184,33 @@ def main():
         print('npx package extractor self-test passed.')
         return 0
 
+    if args.check_versions and not args.files:
+        parser.error('--check-versions needs explicit file paths (avoid example pins across all docs)')
+
     occurrences = {}
     for path in args.files or scoped_files():
         text = path.read_text(encoding='utf-8', errors='replace')
         resolved = path.resolve()
         shown = resolved.relative_to(ROOT) if resolved.is_relative_to(ROOT) else path
-        for name, line in extract(text):
+        for name, line in extract(text, preserve_versions=args.check_versions):
             occurrences.setdefault(name, []).append(f'{shown}:{line}')
     with ThreadPoolExecutor(max_workers=8) as pool:
         statuses = dict(zip(occurrences, pool.map(registry_status, occurrences)))
-    statuses.update({n: WRONG_PUBLISHER[n] for n in statuses if n in WRONG_PUBLISHER})
+    statuses.update({n: WRONG_PUBLISHER[bare_name(n)] for n in statuses if bare_name(n) in WRONG_PUBLISHER})
     failures = {n: s for n, s in statuses.items() if s != 'published'}
     for name in sorted(failures):
         print(f'{name}: {failures[name]}')
         for where in sorted(occurrences[name]):
             print(f'  {where}')
     if failures:
-        print(f'\n{len(failures)} of {len(statuses)} npm names are not published by the project the guide '
-              'credits. Replace each with the package its maintainer publishes, or with an explicit '
-              '<placeholder>.', file=sys.stderr)
+        subject = 'package specifications failed publication checks' if args.check_versions else (
+            'npm names are not published by the project the guide credits')
+        print(f'\n{len(failures)} of {len(statuses)} {subject}. '
+              'Review the package, exact version, or use an explicit <placeholder>.',
+              file=sys.stderr)
         return 1
-    print(f'All {len(statuses)} npm package names cited in npx and npm install commands are published.')
+    noun = 'package specifications' if args.check_versions else 'package names'
+    print(f'All {len(statuses)} npm {noun} cited in npx and npm install commands are published.')
     return 0
 
 

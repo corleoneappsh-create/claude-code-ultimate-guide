@@ -71,6 +71,8 @@ jobs:
           # next reader who copies the command runs that code. Queries the npm
           # registry; the threat database is excluded because AgentSec owns it.
           python3 scripts/check-npx-packages.py --self-test
+          python3 scripts/test-check-npx-package-versions.py
+          # Name-only mode is intentional before the future MCP version is published.
           python3 scripts/check-npx-packages.py
 
       - name: Check reference.yaml structural integrity
