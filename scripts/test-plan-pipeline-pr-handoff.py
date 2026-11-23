@@ -74,14 +74,17 @@ class PullRequestHandoffContract(unittest.TestCase):
     def test_draft_pr_shell_example_parses_without_executing(self):
         step = EXECUTE.split('## Step 6: Push and draft PR', 1)[1].split('## Step 7:', 1)[0]
         blocks = SHELL_FENCE.findall(step)
-        self.assertEqual(len(blocks), 1)
-        check = subprocess.run(['bash', '-n'], input=blocks[0],
-                               capture_output=True, text=True, check=False)
-        self.assertEqual(check.returncode, 0, check.stderr)
+        self.assertGreaterEqual(len(blocks), 1)
+        for block in blocks:
+            check = subprocess.run(['bash', '-n'], input=block,
+                                   capture_output=True, text=True, check=False)
+            self.assertEqual(check.returncode, 0, check.stderr)
 
     def test_draft_pr_script_fails_closed_on_missing_metadata_and_push_errors(self):
         step = EXECUTE.split('## Step 6: Push and draft PR', 1)[1].split('## Step 7:', 1)[0]
-        block, = SHELL_FENCE.findall(step)
+        blocks = SHELL_FENCE.findall(step)
+        self.assertTrue(blocks)
+        block = next(b for b in blocks if "gh pr create" in b)
         self.assertIn('set -euo pipefail', block)
         for guard in ('[ -z "$DEFAULT_BRANCH" ]', '[ -z "$ACTUAL_REPOSITORY" ]',
                       '[ -z "$BASE_BRANCH" ]', '[ -z "$CURRENT_BRANCH" ]'):
@@ -132,6 +135,10 @@ class PullRequestHandoffContract(unittest.TestCase):
             with self.subTest(stage=path.parent.name):
                 self.assertIn("execute to draft PR handoff", path.read_text())
                 self.assertNotIn("execute to merged PR", path.read_text())
+
+    def test_owner_guidance_labels_pr_inspector_advisory(self):
+        self.assertIn("inspect-pr-review-evidence.py", EXECUTE)
+        self.assertIn("not a merge authorization", EXECUTE.lower())
 
     def test_ci_runs_as_independent_job(self):
         self.assertRegex(CI, r"(?m)^  plan_pipeline_handoff:\s*$")

@@ -172,6 +172,20 @@ Before any later merge, the authorized owner or repository-controlled merge work
 
 Leave the draft PR open and return its URL, current PR head SHA, completed local checks, and pending approvals/checks to the owner. The model's statements are not acceptance evidence; repository settings enforce the actual boundary. If checks are missing, failed, stale, or unavailable, report **PENDING / NOT MERGED**. Do not bypass repository policy.
 
+For a **separate owner-run read-only diagnostic**, the repository provides `scripts/inspect-pr-review-evidence.py`. After the owner declares the review policy and when there is a PR to inspect, it reads actual GitHub PR, review, check-run and status records twice where needed to detect revision changes. Example:
+
+```bash
+python3 scripts/inspect-pr-review-evidence.py \
+  --repo "$APPROVED_REPOSITORY" \
+  --pr "$PR_NUMBER" \
+  --base "$BASE_BRANCH" \
+  --expected-head "$EXPECTED_PR_HEAD_SHA" \
+  --required-check "$OWNER_DECLARED_REQUIRED_CHECK" \
+  --min-approvals "$OWNER_DECLARED_MIN_APPROVALS"
+```
+
+Repeat `--required-check` for additional check names. **This is not a merge authorization**: the supplied policy is not an independently verified branch-protection configuration, and an exit code of zero only means the named evidence was observed. Never turn its advisory verdict into an automatic merge command. A draft PR remains blocked even when all declared checks pass.
+
 ---
 
 ## Step 7: Post-merge metrics (separate owner-controlled follow-up)

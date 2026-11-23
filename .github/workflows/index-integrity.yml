@@ -52,8 +52,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Verify draft PR and owner-review handoff contract
-        run: python3 scripts/test-plan-pipeline-pr-handoff.py
+      - name: Verify draft PR handoff and read-only GitHub evidence inspector
+        run: |
+          python3 scripts/test-plan-pipeline-pr-handoff.py
+          python3 scripts/test-inspect-pr-review-evidence.py
 
   check:
     runs-on: ubuntu-latest
