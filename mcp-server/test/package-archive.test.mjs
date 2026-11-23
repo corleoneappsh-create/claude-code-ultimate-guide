@@ -15,6 +15,33 @@ const manifest = JSON.parse(readFileSync(resolve(guideRoot, 'machine-readable/mc
 const packageJson = JSON.parse(readFileSync(resolve(packageRoot, 'package.json'), 'utf8'))
 const [binaryName] = Object.keys(packageJson.bin)
 
+function onePackedArchive(stdout) {
+  const parsed = JSON.parse(stdout)
+  const archives = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === 'object' && Object.keys(parsed).length === 1
+      && Object.hasOwn(parsed, packageJson.name)
+      ? [parsed[packageJson.name]]
+      : []
+  assert.equal(archives.length, 1, 'npm pack must report exactly one archive')
+  const [archive] = archives
+  assert.ok(archive && typeof archive === 'object' && !Array.isArray(archive),
+    'npm pack must describe a single archive object')
+  return archive
+}
+
+test('npm pack JSON supports npm 10 arrays and npm 12 keyed objects, but rejects ambiguity', () => {
+  const sample = { name: packageJson.name, version: packageJson.version, files: [] }
+  assert.deepEqual(onePackedArchive(JSON.stringify([sample])), sample)
+  assert.deepEqual(onePackedArchive(JSON.stringify({ [packageJson.name]: sample })), sample)
+  assert.throws(() => onePackedArchive(JSON.stringify([])), /exactly one archive/)
+  assert.throws(() => onePackedArchive(JSON.stringify([sample, sample])), /exactly one archive/)
+  assert.throws(() => onePackedArchive(JSON.stringify({ unrelated: sample })), /exactly one archive/)
+  assert.throws(() => onePackedArchive(JSON.stringify({ [packageJson.name]: sample, extra: sample })), /exactly one archive/)
+  assert.throws(() => onePackedArchive(JSON.stringify([null])), /single archive object/)
+  assert.throws(() => onePackedArchive(JSON.stringify([[sample]])), /single archive object/)
+})
+
 function sortByName(values) {
   return [...values].sort((left, right) => left.name.localeCompare(right.name))
 }
@@ -46,7 +73,7 @@ test('npm package excludes development files and preserves the MCP list contract
     const env = npmReleaseEnvironment(cacheDirectory)
     const pack = spawnSync('npm', ['pack', '--json', '--pack-destination', tempDirectory], { cwd: packageRoot, encoding: 'utf8', env })
     assert.equal(pack.status, 0, pack.stderr)
-    const [archive] = JSON.parse(pack.stdout)
+    const archive = onePackedArchive(pack.stdout)
     assert.equal(archive.name, packageJson.name)
     assert.equal(archive.version, packageJson.version)
     const required = ['dist/index.js', 'content/reference.yaml', 'content/translations.json']

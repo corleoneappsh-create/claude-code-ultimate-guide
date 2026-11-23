@@ -2,12 +2,12 @@ import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import test from 'node:test'
 import { buildSync } from 'esbuild'
 
-const packageRoot = resolve(import.meta.dirname, '..')
+const packageRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..')
 const guideRoot = resolve(packageRoot, '..')
 async function withUrls(run) {
   const directory = mkdtempSync(join(tmpdir(), 'guide-links-test-'))
@@ -119,9 +119,44 @@ test('standalone bundled routing works when filesystem access to any guide is de
   await withUrls(async (urls, directory) => {
     const bundle = join(directory, 'urls.mjs')
     const moduleUrl = 'data:text/javascript;base64,' + Buffer.from(readFileSync(bundle, 'utf8')).toString('base64')
-    const script = 'import {guideSiteUrl} from ' + JSON.stringify(moduleUrl) + '; console.log(guideSiteUrl("guide/ultimate-guide.md",10043))'
+    const script = 'const {guideSiteUrl} = await import(' + JSON.stringify(moduleUrl) + '); console.log(guideSiteUrl("guide/ultimate-guide.md",10043))'
     const env = { ...process.env }; delete env.GUIDE_ROOT
-    const result = spawnSync(process.execPath, ['--permission', '--input-type=module', '-e', script], { env, cwd: directory, encoding: 'utf8' })
+    // Node 22 exposes --permission; Node 20 uses --experimental-permission.
+    // Node 18 has neither. Its fallback denies filesystem reads before
+    // dynamically importing the standalone bundled module.
+    const permissionFlag = ['--permission', '--experimental-permission']
+      .find(flag => process.allowedNodeEnvironmentFlags.has(flag))
+    assert.ok(permissionFlag || Number(process.versions.node.split('.')[0]) < 20,
+      'Node 20+ must retain an OS-level filesystem permission flag')
+    const osPermissionProbe = [
+      'import fs from "node:fs";',
+      'try { fs.readFileSync(' + JSON.stringify(bundle) + '); throw new Error("PERMISSION_GUARD_NOT_ACTIVE"); }',
+      'catch (error) { if (error.code !== "ERR_ACCESS_DENIED") throw error; }',
+    ].join('\n')
+    const fallbackFilesystemGuard = [
+      'import fs from "node:fs";',
+      'import { syncBuiltinESMExports } from "node:module";',
+      'const forbidden = () => { throw new Error("FILESYSTEM_DENIED_BY_TEST"); };',
+      'for (const method of ["readFileSync", "openSync", "statSync", "existsSync", "realpathSync", "readdirSync",',
+      '  "lstatSync", "accessSync", "opendirSync", "readlinkSync", "createReadStream",',
+      '  "readFile", "open", "stat", "lstat", "access", "exists", "realpath", "readdir", "opendir", "readlink"]) {',
+      '  if (typeof fs[method] === "function") fs[method] = forbidden;',
+      '}',
+      'for (const method of ["readFile", "open", "stat", "lstat", "access", "realpath", "readdir", "opendir", "readlink"]) {',
+      '  if (typeof fs.promises[method] === "function") fs.promises[method] = forbidden;',
+      '}',
+      'syncBuiltinESMExports();',
+      'const namedFs = await import("node:fs");',
+      'const promisesFs = await import("node:fs/promises");',
+      'for (const read of [() => fs.readFileSync("dummy"), () => namedFs.readFileSync("dummy"),',
+      '  () => promisesFs.readFile("dummy")]) {',
+      '  try { await read(); throw new Error("GUARD_NOT_APPLIED"); }',
+      '  catch (error) { if (error.message !== "FILESYSTEM_DENIED_BY_TEST") throw error; }',
+      '}',
+    ].join('\n')
+    const guardedScript = (permissionFlag ? osPermissionProbe : fallbackFilesystemGuard) + '\n' + script
+    const args = [...(permissionFlag ? [permissionFlag] : []), '--input-type=module', '-e', guardedScript]
+    const result = spawnSync(process.execPath, args, { env, cwd: directory, encoding: 'utf8' })
     assert.equal(result.status, 0, result.stderr)
     assert.equal(result.stdout.trim(), 'https://cc.bruniaux.com/guide/ultimate-guide/07-hooks/')
   })
