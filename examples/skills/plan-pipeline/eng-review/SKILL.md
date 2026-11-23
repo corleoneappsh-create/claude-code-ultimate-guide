@@ -185,5 +185,5 @@ Failure modes:
 /plan-pipeline:eng-review    -> architecture locked        <- you are here
 /plan-pipeline:start         -> produce implementation plan
 /plan-pipeline:validate      -> validate before execution
-/plan-pipeline:execute       -> execute to merged PR
+/plan-pipeline:execute       -> execute to draft PR handoff
 ```

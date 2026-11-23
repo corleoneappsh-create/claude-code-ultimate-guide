@@ -1,6 +1,6 @@
 ---
 title: "Plan-Validate-Execute Pipeline"
-description: "Production-grade 3-command workflow with dynamic agent teams, ADR learning loop, and automated execution from PRD to merged PR"
+description: "Three-command workflow from plan through verification to draft PR; merge requires separate owner-controlled acceptance"
 tags: [workflow, agents, architecture, advanced]
 ---
 
@@ -8,7 +8,7 @@ tags: [workflow, agents, architecture, advanced]
 
 > **Confidence**: Tier 2, battle-tested by production teams shipping AI-first products at scale. Extends native `/plan` mode with structured agent orchestration and institutional memory.
 
-A complete development workflow in 3 commands: plan with a dynamic research team, validate with independent specialist reviewers, execute with parallel agents. Each run improves the next through an ADR learning loop that progressively reduces human interruptions.
+A proposed development workflow in 3 commands: plan with a research team, validate with independent specialist reviewers, then execute approved work with scoped agents and hand off a draft PR. Creating a PR is not merging or releasing it; those decisions require separate acceptance.
 
 **Reading time**: ~25 min
 **Prerequisites**: Sub-agents, Task tool, worktrees, basic ADR concepts
@@ -36,14 +36,14 @@ A complete development workflow in 3 commands: plan with a dynamic research team
 ```
 /plan-start    → 5-phase planning: PRD analysis + dynamic research team + ADRs
 /plan-validate → 2-layer review: structural checks + trigger-based specialist agents
-/plan-execute  → worktree + TDD + parallel execution + PR + merge + cleanup
+/plan-execute  → worktree + TDD + parallel execution + draft PR + review handoff
 ```
 
 **What makes this different from `/plan` mode**:
 - Research is done by specialized agents in parallel, not one agent sequentially
 - Validation is independent from planning (no confirmation bias)
 - Every significant decision generates an ADR that auto-resolves future decisions
-- Execution spawns per-task agents in a git worktree, commits per task, handles everything through to merged PR
+- Execution spawns scoped agents in a git worktree, commits per task, and stops at a draft PR awaiting review
 
 **Run `/clear` between each command** to reset context and avoid compacting overhead.
 
@@ -166,23 +166,23 @@ Every issue must be resolved, no skipping. Triage:
 3. Issues resolvable from first principles → auto-resolve
 4. Residual → human decision → new rule → auto-resolved next time
 
-**Auto-transition**: all issues resolved → auto-start `/plan-execute`
+**Execution authorization**: after validation, obtain explicit owner authorization for repository writes and remote push before starting `/plan-execute`. A validated plan does not authorize a merge.
 
 ---
 
-### `/plan-execute`: Execution to merged PR
+### `/plan-execute`: Execution to draft PR handoff
 
-Single command handles everything:
+The execution command prepares a draft PR, then stops. It does not merge or release changes:
 
 1. **Worktree creation**: isolated branch from current branch
 2. **TDD scaffolding**: write failing tests first for TDD-marked tasks
 3. **Level-based parallel execution**: detect independent tasks, spawn per-task agents, commit per task
 4. **Drift detection**: flag if implementation diverges from plan
 5. **Quality gate**: parallel tests + integration smoke test (GraphQL probe, container log scan, plan-defined smoke commands)
-6. **Pre-PR docs update**: PRD reconciliation + plan archival (in worktree)
-7. **PR creation and merge**: squash merge, clean commit message
-8. **Post-merge metrics**: execution data committed to metrics file
-9. **Worktree cleanup**: remove branch and worktree
+6. **Pre-PR docs update**: PRD reconciliation + plan status in-review (in worktree)
+7. **Draft PR and review handoff**: publish only with explicit owner authorization, then provide the PR URL and current PR head SHA; do not auto-merge
+8. **Owner-controlled merge**: separately verify branch protection, required CI checks on the current revision, required approvals, and explicit owner authorization
+9. **Post-merge plan archival, metrics and cleanup**: separate follow-up after a confirmed merge; do not delete branches or worktrees while a PR is pending
 
 If quality gate fails: up to 3 auto-fix attempts by dedicated debug agents. Still failing → notify human.
 

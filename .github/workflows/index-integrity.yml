@@ -43,6 +43,20 @@ on:
       - ".github/workflows/collect-mcp-dashboard.yml"
 
 jobs:
+  plan_pipeline_handoff:
+    name: Plan-pipeline PR authorization boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Verify draft PR handoff and read-only GitHub evidence inspector
+        run: |
+          python3 scripts/test-plan-pipeline-pr-handoff.py
+          python3 scripts/test-inspect-pr-review-evidence.py
+
   check:
     runs-on: ubuntu-latest
 

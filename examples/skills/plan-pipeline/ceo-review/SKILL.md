@@ -127,5 +127,5 @@ Do NOT make any code changes. This is a review, not an implementation.
 /plan-pipeline:eng-review    -> lock technical architecture
 /plan-pipeline:start         -> produce implementation plan
 /plan-pipeline:validate      -> validate before execution
-/plan-pipeline:execute       -> execute to merged PR
+/plan-pipeline:execute       -> execute to draft PR handoff
 ```

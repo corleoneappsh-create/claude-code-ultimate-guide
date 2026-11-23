@@ -49,7 +49,8 @@ Orchestrates the complete plan-to-execution pipeline. Can run the full pipeline 
 5. **start**: run 5-phase planning, produce `docs/plans/plan-{name}.md`
 6. **CHECKPOINT**: present plan for review before validation
 7. **validate**: 2-layer validation (structural + specialist agents)
-8. **execute**: worktree isolation -> parallel agents -> quality gate -> PR
+8. **CHECKPOINT: ask for explicit owner authorization before execute** (validated plan is not permission to push or merge)
+9. **execute**: authorized worktree changes -> quality gate -> draft PR and review handoff; merge remains owner-controlled
 
 ## Dependency graph
 

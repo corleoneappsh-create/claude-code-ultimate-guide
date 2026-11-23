@@ -182,5 +182,5 @@ For simple changes (typos, trivial refactors): use `/plan` mode instead.
 /plan-pipeline:eng-review    → architecture locked
 /plan-pipeline:start         → produce implementation plan   ← you are here
 /plan-pipeline:validate      → validate before execution
-/plan-pipeline:execute       → execute to merged PR
+/plan-pipeline:execute       → execute to draft PR handoff
 ```
